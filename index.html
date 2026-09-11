@@ -3,37 +3,43 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#111827" />
+  <meta name="theme-color" content="#0b0e12" />
   <title>Metin2 Okey Solver</title>
   <link rel="stylesheet" href="./css/styles.css" />
 </head>
 <body>
+  <div class="top-rule"></div>
   <header class="site-header">
-    <div>
-      <h1>Metin2 Okey Solver</h1>
-      <p>Maximum expected score, turn by turn.</p>
+    <div class="brand">
+      <div class="brand-mark">M2</div>
+      <div>
+        <div class="eyebrow">OKEY ADVISOR</div>
+        <h1>Metin2 Okey Solver</h1>
+        <p>One clear move. Maximum expected score.</p>
+      </div>
     </div>
-    <span class="version">v0.1</span>
+    <span class="version">v0.2</span>
   </header>
 
   <nav class="tabs" aria-label="Main navigation">
     <button class="tab active" data-view="play">Play</button>
-    <button class="tab" data-view="history">Game History</button>
-    <button class="tab" data-view="stats">Statistics</button>
+    <button class="tab" data-view="history">History</button>
+    <button class="tab" data-view="stats">Stats</button>
   </nav>
 
   <main>
     <section id="view-play" class="view active">
       <div class="summary-grid">
         <div class="metric"><span>Score</span><strong id="score-value">0</strong></div>
-        <div class="metric"><span>Cards on table</span><strong id="hand-count">0 / 5</strong></div>
-        <div class="metric"><span>Cards unseen</span><strong id="unseen-count">24</strong></div>
-        <div class="metric"><span>Cards used</span><strong id="used-count">0</strong></div>
+        <div class="metric"><span>On table</span><strong id="hand-count">0 / 5</strong></div>
+        <div class="metric"><span>Unseen</span><strong id="unseen-count">24</strong></div>
+        <div class="metric"><span>Used</span><strong id="used-count">0</strong></div>
       </div>
 
-      <section class="panel">
+      <section class="panel table-panel">
         <div class="panel-head">
           <div>
+            <div class="section-kicker">YOUR HAND</div>
             <h2>Current table</h2>
             <p id="table-hint">Select the first 5 cards shown in Metin2.</p>
           </div>
@@ -45,23 +51,26 @@
         <div id="hand-slots" class="hand-slots" aria-live="polite"></div>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
+      <section class="panel card-picker-panel">
+        <div class="panel-head compact-head">
           <div>
+            <div class="section-kicker">CARD SET</div>
             <h2>Select cards</h2>
-            <p>Blue, Red and Yellow each contain cards 1–8.</p>
           </div>
+          <p class="panel-side-note">Blue · Red · Yellow &nbsp;|&nbsp; 1–8</p>
         </div>
         <div id="card-grid" class="card-grid-wrap"></div>
       </section>
 
-      <section class="panel solver-panel">
+      <section class="panel advisor-panel">
+        <div class="advisor-glow"></div>
         <div class="panel-head solver-head">
           <div>
-            <h2>Best move</h2>
-            <p>The solver ranks every legal play and discard by expected final score.</p>
+            <div class="section-kicker gold">OKEY ADVISOR</div>
+            <h2>Recommended move</h2>
+            <p>Only the strongest option is shown.</p>
           </div>
-          <label class="precision-label">Precision
+          <label class="precision-label">Calculation
             <select id="precision-select">
               <option value="250">Fast</option>
               <option value="800" selected>Strong</option>
@@ -80,8 +89,9 @@
     </section>
 
     <section id="view-history" class="view">
-      <div class="panel-head page-head">
+      <div class="page-head">
         <div>
+          <div class="section-kicker">ARCHIVE</div>
           <h2>Game History</h2>
           <p>Every turn is stored locally in this browser.</p>
         </div>
@@ -94,22 +104,23 @@
     </section>
 
     <section id="view-stats" class="view">
-      <div class="panel-head page-head">
+      <div class="page-head">
         <div>
+          <div class="section-kicker">PERFORMANCE</div>
           <h2>Statistics</h2>
           <p>Observed performance from your real games.</p>
         </div>
       </div>
       <div id="stats-grid" class="summary-grid"></div>
       <section class="panel">
-        <h3>What we will use this data for</h3>
-        <p class="muted">We separate decision quality from luck. A good decision can still produce a bad draw. The useful metric is expected-value regret: the EV of the recommended move minus the EV of the move actually taken.</p>
+        <h3>Decision quality vs. luck</h3>
+        <p class="muted">A bad draw does not automatically mean a bad decision. We keep the full EV data in the background so later we can evaluate and improve the solver using real games.</p>
       </section>
     </section>
   </main>
 
   <footer>
-    <p>Runs entirely in your browser. No account or server required.</p>
+    <span class="footer-gem">◆</span> Built as a local-first Metin2 companion.
   </footer>
 
   <script type="module" src="./js/app.js"></script>

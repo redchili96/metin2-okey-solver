@@ -1,4 +1,4 @@
-import { CARDS, COLORS, CARD_BY_ID, unseenCards, actionLabel, createGame } from './game.js';
+import { COLORS, CARD_BY_ID, unseenCards, actionLabel, createGame } from './game.js';
 import { saveGame, getGames, getLatestActiveGame, importGames, deleteGame } from './storage.js';
 
 const els = Object.fromEntries([...document.querySelectorAll('[id]')].map(el => [el.id, el]));
@@ -24,7 +24,7 @@ function initWorker(){
     if(msg.type==='result'){
       latestRanking=msg.ranked;
       renderRanking();
-      els['solver-status'].textContent=`Compared ${msg.ranked.length} legal moves using ${msg.simulationsPerAction} simulated futures per move.`;
+      els['solver-status'].textContent=`Best move calculated from ${msg.ranked.length} legal moves.`;
       els['analyze-btn'].disabled=false;
     }
   };
@@ -105,24 +105,26 @@ async function toggleCard(id){
 
 function analyze(){
   if(game.hand.length!==5)return;
-  els['analyze-btn'].disabled=true;els['solver-status'].textContent='Calculating expected final score…';els['solver-results'].innerHTML='';
+  els['analyze-btn'].disabled=true;
+  els['solver-status'].textContent='Calculating the best move…';
+  els['solver-results'].innerHTML='';
   worker.postMessage({type:'analyze',state:{hand:game.hand,used:game.used,score:game.score},simulations:Number(els['precision-select'].value)});
 }
 
 function renderRanking(){
+  const best=latestRanking[0];
   const host=els['solver-results'];host.innerHTML='';
-  latestRanking.slice(0,4).forEach((row,index)=>{
-    const card=document.createElement('article');card.className=`result-card${index===0?' best':''}`;
-    const ci=Math.max(1,1.96*row.se);
-    card.innerHTML=`<div class="result-top"><div><div class="result-rank">${index===0?'RECOMMENDED':`OPTION ${index+1}`}</div><div class="result-title">${actionLabel(row.action)}</div></div><span class="badge">EV SEARCH</span></div><div class="result-metrics"><div><span>Expected remaining score</span><strong>${row.mean.toFixed(1)} ± ${ci.toFixed(1)}</strong></div><div><span>Projected final score</span><strong>${(game.score+row.mean).toFixed(1)}</strong></div><div><span>EV gap vs best</span><strong>${index===0?'0.0':(latestRanking[0].mean-row.mean).toFixed(1)}</strong></div></div>`;
-    const button=document.createElement('button');button.type='button';button.className=index===0?'primary':'secondary';button.textContent=index===0?'Apply recommended move':'Apply this move';button.addEventListener('click',()=>applyMove(row));card.appendChild(button);host.appendChild(card);
-  });
+  if(!best)return;
+  const card=document.createElement('article');card.className='result-card best';
+  const ci=Math.max(1,1.96*best.se);
+  card.innerHTML=`<div class="result-top"><div><div class="result-rank">BEST MOVE</div><div class="result-title">${actionLabel(best.action)}</div></div><span class="badge">RECOMMENDED</span></div><div class="result-metrics"><div><span>Expected remaining</span><strong>${best.mean.toFixed(1)} ± ${ci.toFixed(1)}</strong></div><div><span>Projected final</span><strong>${(game.score+best.mean).toFixed(1)}</strong></div><div><span>Calculation</span><strong>EV Search</strong></div></div>`;
+  const button=document.createElement('button');button.type='button';button.className='primary';button.textContent='Apply move';button.addEventListener('click',()=>applyMove(best));card.appendChild(button);host.appendChild(card);
 }
 
 async function applyMove(selectedRow){
   snapshot();
   const before={score:game.score,hand:[...game.hand],used:[...game.used]};
-  const best=latestRanking[0];
+  const best=latestRanking[0] || selectedRow;
   const turn={
     turn:game.turns.length+1,
     timestamp:new Date().toISOString(),
