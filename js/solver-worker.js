@@ -115,5 +115,7 @@ self.onmessage=(event)=>{
     const rng=mulberry32(hashSeed(seed));
     const ranked=acts.map(action=>({action,...estimate(state,action,per,rng)})).sort((a,b)=>b.mean-a.mean);
     self.postMessage({type:'result',ranked,simulationsPerAction:per,seed});
-  }catch(error){self.postMessage({type:'error',message:error?.message||String(error)});}
+  }catch(error){
+    self.postMessage({type:'error',message:error?.message||String(error),seed});
+  }
 };
