@@ -17,6 +17,11 @@ export const CARDS = COLORS.flatMap((color, colorIndex) =>
 
 export const CARD_BY_ID = Object.fromEntries(CARDS.map(card => [card.id, card]));
 
+export function cardLabel(id) {
+  const card = CARD_BY_ID[id];
+  return card ? `${card.value} (${card.colorLabel})` : String(id ?? '');
+}
+
 export function scoreCombination(ids) {
   if (!Array.isArray(ids) || ids.length !== 3) return 0;
   const cards = ids.map(id => CARD_BY_ID[id]).filter(Boolean);
@@ -53,8 +58,10 @@ export function unseenCards(hand, used) {
 }
 
 export function actionLabel(action) {
-  if (action.type === 'play') return `Play ${action.cards.join(' + ')} — ${action.score} pts`;
-  return `Discard ${action.cards[0]}`;
+  if (!action) return '—';
+  const cards = (action.cards || []).map(cardLabel);
+  if (action.type === 'play') return `Play ${cards.join(' + ')} — ${action.score} pts`;
+  return `Discard ${cards[0] || '—'}`;
 }
 
 export function createGame() {

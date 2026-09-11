@@ -1,4 +1,4 @@
-import { COLORS, CARD_BY_ID, unseenCards, actionLabel, createGame } from './game.js';
+import { COLORS, CARD_BY_ID, unseenCards, actionLabel, cardLabel, createGame } from './game.js';
 import { saveGame, getGames, getLatestActiveGame, importGames, deleteGame } from './storage.js';
 import { queueGameTelemetry, flushTelemetryQueue } from './telemetry.js';
 
@@ -9,6 +9,10 @@ let latestRanking = [];
 let latestSolverMeta = null;
 let worker = null;
 let analysisStartedAt = 0;
+let analysisTimer = null;
+let activeAnalysisSeed = null;
+let activeAnalysisKey = null;
+let completedAnalysisKey = null;
 
 function clone(value){ return structuredClone(value); }
 function fmtDate(iso){ return new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(iso)); }
@@ -19,6 +23,15 @@ function canAnalyzeCurrentState(){
   const unseenCount=currentUnseenCount();
   return game.hand.length>0 && game.pendingDraws===0 && (game.hand.length===5 || unseenCount===0);
 }
+function currentAnalysisKey(){
+  return JSON.stringify({
+    hand:[...game.hand].sort(),
+    used:[...game.used].sort(),
+    score:game.score,
+    simulations:Number(els['precision-select'].value||800),
+  });
+}
+function formatCards(ids){ return (ids||[]).map(cardLabel).join(' · '); }
 
 function initWorker(){
   worker?.terminate();
@@ -26,11 +39,14 @@ function initWorker(){
   worker.onmessage = event => {
     const msg = event.data;
     if(msg.type==='error'){
-      els['solver-status'].textContent=`Solver error: ${msg.message}`;
-      els['analyze-btn'].disabled=!canAnalyzeCurrentState();
+      if(msg.seed && msg.seed!==activeAnalysisSeed)return;
+      activeAnalysisSeed=null;
+      activeAnalysisKey=null;
+      els['solver-status'].textContent=`Calculation failed: ${msg.message}`;
       return;
     }
     if(msg.type==='result'){
+      if(msg.seed!==activeAnalysisSeed || activeAnalysisKey!==currentAnalysisKey())return;
       latestRanking=msg.ranked;
       latestSolverMeta={
         solverSeed:msg.seed,
@@ -39,9 +55,11 @@ function initWorker(){
         solverMode:currentSolverMode(),
         computeTimeMs:Math.max(0,Math.round(performance.now()-analysisStartedAt)),
       };
+      completedAnalysisKey=activeAnalysisKey;
+      activeAnalysisSeed=null;
+      activeAnalysisKey=null;
       renderRanking();
-      els['solver-status'].textContent=`Best move calculated from ${msg.ranked.length} legal moves.`;
-      els['analyze-btn'].disabled=!canAnalyzeCurrentState();
+      els['solver-status'].textContent='Recommendation ready.';
     }
   };
 }
@@ -65,7 +83,7 @@ function renderCards(){
     const label=document.createElement('div');label.className='row-label';label.textContent=color.label;row.appendChild(label);
     for(let v=1;v<=8;v++){
       const id=`${color.code}${v}`,button=document.createElement('button');
-      button.type='button';button.className=`card ${color.css}`;button.textContent=String(v);button.setAttribute('aria-label',`${color.label} ${v}`);
+      button.type='button';button.className=`card ${color.css}`;button.textContent=String(v);button.setAttribute('aria-label',`${v} (${color.label})`);
       if(game.hand.includes(id))button.classList.add('selected');
       if(game.used.includes(id)){button.classList.add('used');button.disabled=true;}
       button.addEventListener('click',()=>toggleCard(id));row.appendChild(button);
@@ -80,7 +98,7 @@ function renderHand(){
     const id=game.hand[i];
     if(!id){const slot=document.createElement('div');slot.className='slot empty';slot.textContent='Empty';host.appendChild(slot);continue;}
     const card=CARD_BY_ID[id],slot=document.createElement('div');slot.className='slot';
-    const button=document.createElement('button');button.type='button';button.className=`card ${card.css}`;button.textContent=String(card.value);button.title='Click to correct/remove this card';button.addEventListener('click',()=>toggleCard(id));slot.appendChild(button);host.appendChild(slot);
+    const button=document.createElement('button');button.type='button';button.className=`card ${card.css}`;button.textContent=String(card.value);button.title=`${cardLabel(id)} — click to correct/remove`;button.setAttribute('aria-label',cardLabel(id));button.addEventListener('click',()=>toggleCard(id));slot.appendChild(button);host.appendChild(slot);
   }
 }
 
@@ -90,26 +108,63 @@ function renderSummary(){
   els['hand-count'].textContent=`${game.hand.length} / 5`;
   els['unseen-count'].textContent=String(unseenCount);
   els['used-count'].textContent=String(game.used.length);
-  els['analyze-btn'].disabled=!canAnalyzeCurrentState();
   els['end-game-btn'].disabled=game.turns.length===0;
   if(game.pendingDraws>0){
     els['table-hint'].textContent=`Add ${game.pendingDraws} newly drawn card${game.pendingDraws===1?'':'s'}.`;
   }else if(game.hand.length===0 && unseenCount===0){
     els['table-hint'].textContent='All cards used. End & save the game.';
   }else if(game.hand.length<5 && unseenCount===0){
-    els['table-hint'].textContent=`Final hand: ${game.hand.length} card${game.hand.length===1?'':'s'} left. Analyze the best move.`;
+    els['table-hint'].textContent=`Final hand · ${game.hand.length} card${game.hand.length===1?'':'s'} left.`;
   }else if(game.hand.length<5){
     els['table-hint'].textContent=`Select ${5-game.hand.length} more card${5-game.hand.length===1?'':'s'} from Metin2.`;
   }else{
-    els['table-hint'].textContent='Table captured. Analyze the best move.';
+    els['table-hint'].textContent='Hand ready.';
   }
 }
 
-function clearRanking(message='State changed — analyze again.'){
-  latestRanking=[];latestSolverMeta=null;els['solver-results'].innerHTML='';els['solver-status'].textContent=message;
+function clearRanking(message='Waiting for your hand…'){
+  if(analysisTimer){clearTimeout(analysisTimer);analysisTimer=null;}
+  activeAnalysisSeed=null;
+  activeAnalysisKey=null;
+  completedAnalysisKey=null;
+  latestRanking=[];
+  latestSolverMeta=null;
+  els['solver-results'].innerHTML='';
+  els['solver-status'].textContent=message;
 }
 
-function render(){ renderSummary();renderHand();renderCards(); }
+function scheduleAutoAnalysis(){
+  if(!canAnalyzeCurrentState())return;
+  const key=currentAnalysisKey();
+  if(activeAnalysisKey===key || completedAnalysisKey===key)return;
+  if(analysisTimer)clearTimeout(analysisTimer);
+  analysisTimer=setTimeout(()=>{
+    analysisTimer=null;
+    startAutomaticAnalysis(key);
+  },80);
+}
+
+function startAutomaticAnalysis(expectedKey){
+  if(!canAnalyzeCurrentState() || currentAnalysisKey()!==expectedKey)return;
+  activeAnalysisKey=expectedKey;
+  activeAnalysisSeed=globalThis.crypto?.randomUUID?.() || `seed-${Date.now()}-${Math.random()}`;
+  els['solver-status'].textContent='Calculating best move…';
+  els['solver-results'].innerHTML='';
+  analysisStartedAt=performance.now();
+  worker.postMessage({
+    type:'analyze',
+    state:{hand:game.hand,used:game.used,score:game.score},
+    simulations:Number(els['precision-select'].value),
+    seed:activeAnalysisSeed,
+  });
+}
+
+function render(){
+  renderSummary();
+  renderHand();
+  renderCards();
+  scheduleAutoAnalysis();
+}
 
 async function toggleCard(id){
   if(game.used.includes(id))return;
@@ -122,21 +177,10 @@ async function toggleCard(id){
   if(game.pendingDraws>0){
     game.pendingDraws--;
     const last=game.turns.at(-1);
-    if(last) last.draws.push(id);
+    if(last)last.draws.push(id);
   }
-  const unseenCount=currentUnseenCount();
-  clearRanking(canAnalyzeCurrentState()?(unseenCount===0?'Final hand ready to analyze.':'Ready to analyze.'):'Add the remaining cards.');
+  clearRanking(canAnalyzeCurrentState()?'Preparing recommendation…':'Add the remaining cards.');
   await persist();render();
-}
-
-function analyze(){
-  if(!canAnalyzeCurrentState())return;
-  els['analyze-btn'].disabled=true;
-  els['solver-status'].textContent='Calculating the best move…';
-  els['solver-results'].innerHTML='';
-  analysisStartedAt=performance.now();
-  const seed=globalThis.crypto?.randomUUID?.() || `seed-${Date.now()}-${Math.random()}`;
-  worker.postMessage({type:'analyze',state:{hand:game.hand,used:game.used,score:game.score},simulations:Number(els['precision-select'].value),seed});
 }
 
 function renderRanking(){
@@ -182,11 +226,11 @@ async function applyMove(selectedRow){
   if(game.hand.length===0 && unseenCount===0){
     nextMessage='All cards used. End & save the game.';
   }else if(game.pendingDraws>0){
-    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Enter the replacement cards.`:'Card discarded. Enter the replacement card.';
+    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Add the replacement cards.`:'Add the replacement card.';
   }else if(unseenCount===0){
-    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Final cards remain — analyze again.`:'Final cards remain — analyze again.';
+    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Preparing final recommendation…`:'Preparing final recommendation…';
   }else{
-    nextMessage='Analyze the next move.';
+    nextMessage='Preparing recommendation…';
   }
   clearRanking(nextMessage);
   await persist();render();
@@ -238,7 +282,7 @@ async function renderHistory(){
     const turns=document.createElement('div');turns.className='turn-list';
     for(const t of g.turns){
       const div=document.createElement('div');div.className='turn';
-      div.innerHTML=`<strong>Turn ${t.turn}</strong> · ${t.before.hand.join(' ')} → ${actionLabel(t.chosen)} · draws ${t.draws?.join(' ')||'—'} · regret ${(Number(t.regret)||0).toFixed(1)}`;turns.appendChild(div);
+      div.innerHTML=`<strong>Turn ${t.turn}</strong> · ${formatCards(t.before.hand)} → ${actionLabel(t.chosen)} · draws ${t.draws?.length?formatCards(t.draws):'—'} · regret ${(Number(t.regret)||0).toFixed(1)}`;turns.appendChild(div);
     }
     const del=document.createElement('button');del.className='secondary';del.textContent='Delete game';del.addEventListener('click',async()=>{if(confirm('Delete this saved game?')){await deleteGame(g.id);renderHistory();renderStats();}});
     item.appendChild(turns);item.appendChild(del);host.appendChild(item);
@@ -264,10 +308,10 @@ async function importJson(file){
   const data=JSON.parse(await file.text());await importGames(data);await renderHistory();await renderStats();alert('Games imported successfully.');
 }
 
-els['analyze-btn'].addEventListener('click',analyze);
 els['undo-btn'].addEventListener('click',undo);
 els['new-game-btn'].addEventListener('click',newGame);
 els['end-game-btn'].addEventListener('click',endGame);
+els['precision-select'].addEventListener('change',()=>{clearRanking('Updating recommendation…');render();});
 els['export-json-btn'].addEventListener('click',exportJson);
 els['import-json-input'].addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{await importJson(file);}catch(err){alert(`Import failed: ${err.message}`);}finally{e.target.value='';}});
 window.addEventListener('online',()=>{void flushTelemetryQueue();});
