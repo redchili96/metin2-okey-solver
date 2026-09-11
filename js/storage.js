@@ -1,16 +1,21 @@
 const DB_NAME = 'metin2-okey-solver';
-const DB_VERSION = 1;
-const STORE = 'games';
+const DB_VERSION = 2;
+const GAMES_STORE = 'games';
+const TELEMETRY_STORE = 'telemetry_queue';
 
 function openDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const store = db.createObjectStore(STORE, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(GAMES_STORE)) {
+        const store = db.createObjectStore(GAMES_STORE, { keyPath: 'id' });
         store.createIndex('startedAt', 'startedAt');
         store.createIndex('status', 'status');
+      }
+      if (!db.objectStoreNames.contains(TELEMETRY_STORE)) {
+        const queue = db.createObjectStore(TELEMETRY_STORE, { keyPath: 'id' });
+        queue.createIndex('createdAt', 'createdAt');
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -18,12 +23,12 @@ function openDb() {
   });
 }
 
-async function transaction(mode, fn) {
+async function transaction(storeName, mode, fn) {
   const db = await openDb();
   try {
     return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, mode);
-      const store = tx.objectStore(STORE);
+      const tx = db.transaction(storeName, mode);
+      const store = tx.objectStore(storeName);
       let result;
       try { result = fn(store); } catch (error) { reject(error); return; }
       tx.oncomplete = () => resolve(result);
@@ -36,15 +41,15 @@ async function transaction(mode, fn) {
 }
 
 export async function saveGame(game) {
-  return transaction('readwrite', store => store.put(structuredClone(game)));
+  return transaction(GAMES_STORE, 'readwrite', store => store.put(structuredClone(game)));
 }
 
 export async function getGames() {
   const db = await openDb();
   try {
     return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const request = tx.objectStore(STORE).getAll();
+      const tx = db.transaction(GAMES_STORE, 'readonly');
+      const request = tx.objectStore(GAMES_STORE).getAll();
       request.onsuccess = () => resolve(request.result.sort((a, b) => b.startedAt.localeCompare(a.startedAt)));
       request.onerror = () => reject(request.error);
     });
@@ -65,5 +70,35 @@ export async function importGames(games) {
 }
 
 export async function deleteGame(id) {
-  return transaction('readwrite', store => store.delete(id));
+  return transaction(GAMES_STORE, 'readwrite', store => store.delete(id));
+}
+
+export async function enqueueTelemetry(id, payload) {
+  return transaction(TELEMETRY_STORE, 'readwrite', store => store.put({
+    id,
+    payload: structuredClone(payload),
+    attempts: 0,
+    createdAt: new Date().toISOString(),
+    lastAttemptAt: null,
+  }));
+}
+
+export async function getTelemetryQueue() {
+  const db = await openDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(TELEMETRY_STORE, 'readonly');
+      const request = tx.objectStore(TELEMETRY_STORE).getAll();
+      request.onsuccess = () => resolve(request.result.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+      request.onerror = () => reject(request.error);
+    });
+  } finally { db.close(); }
+}
+
+export async function updateTelemetryQueueItem(item) {
+  return transaction(TELEMETRY_STORE, 'readwrite', store => store.put(structuredClone(item)));
+}
+
+export async function deleteTelemetryQueueItem(id) {
+  return transaction(TELEMETRY_STORE, 'readwrite', store => store.delete(id));
 }
