@@ -1,15 +1,19 @@
 import { COLORS, CARD_BY_ID, unseenCards, actionLabel, createGame } from './game.js';
 import { saveGame, getGames, getLatestActiveGame, importGames, deleteGame } from './storage.js';
+import { queueGameTelemetry, flushTelemetryQueue } from './telemetry.js';
 
 const els = Object.fromEntries([...document.querySelectorAll('[id]')].map(el => [el.id, el]));
 let game = null;
 let historyStack = [];
 let latestRanking = [];
+let latestSolverMeta = null;
 let worker = null;
+let analysisStartedAt = 0;
 
 function clone(value){ return structuredClone(value); }
 function fmtDate(iso){ return new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(iso)); }
 function avg(values){ return values.length ? values.reduce((a,b)=>a+b,0)/values.length : 0; }
+function currentSolverMode(){ return els['precision-select'].selectedOptions?.[0]?.textContent?.trim().toLowerCase() || 'strong'; }
 
 function initWorker(){
   worker?.terminate();
@@ -23,6 +27,13 @@ function initWorker(){
     }
     if(msg.type==='result'){
       latestRanking=msg.ranked;
+      latestSolverMeta={
+        solverSeed:msg.seed,
+        simulationsPerAction:Number(msg.simulationsPerAction||0),
+        simulationCount:Number(els['precision-select'].value||0),
+        solverMode:currentSolverMode(),
+        computeTimeMs:Math.max(0,Math.round(performance.now()-analysisStartedAt)),
+      };
       renderRanking();
       els['solver-status'].textContent=`Best move calculated from ${msg.ranked.length} legal moves.`;
       els['analyze-btn'].disabled=false;
@@ -81,7 +92,7 @@ function renderSummary(){
 }
 
 function clearRanking(message='State changed — analyze again.'){
-  latestRanking=[];els['solver-results'].innerHTML='';els['solver-status'].textContent=message;
+  latestRanking=[];latestSolverMeta=null;els['solver-results'].innerHTML='';els['solver-status'].textContent=message;
 }
 
 function render(){ renderSummary();renderHand();renderCards(); }
@@ -108,7 +119,9 @@ function analyze(){
   els['analyze-btn'].disabled=true;
   els['solver-status'].textContent='Calculating the best move…';
   els['solver-results'].innerHTML='';
-  worker.postMessage({type:'analyze',state:{hand:game.hand,used:game.used,score:game.score},simulations:Number(els['precision-select'].value)});
+  analysisStartedAt=performance.now();
+  const seed=globalThis.crypto?.randomUUID?.() || `seed-${Date.now()}-${Math.random()}`;
+  worker.postMessage({type:'analyze',state:{hand:game.hand,used:game.used,score:game.score},simulations:Number(els['precision-select'].value),seed});
 }
 
 function renderRanking(){
@@ -137,6 +150,11 @@ async function applyMove(selectedRow){
     regret:Math.max(0,best.mean-selectedRow.mean),
     draws:[],
     points:selectedRow.action.score,
+    solverSeed:latestSolverMeta?.solverSeed||null,
+    solverMode:latestSolverMeta?.solverMode||currentSolverMode(),
+    simulationCount:latestSolverMeta?.simulationCount||Number(els['precision-select'].value||0),
+    simulationsPerAction:latestSolverMeta?.simulationsPerAction||0,
+    computeTimeMs:latestSolverMeta?.computeTimeMs??null,
   };
   game.turns.push(turn);
   game.hand=game.hand.filter(id=>!selectedRow.action.cards.includes(id));
@@ -147,15 +165,28 @@ async function applyMove(selectedRow){
   await persist();render();
 }
 
+async function archiveForTelemetry(archivedGame){
+  try{
+    await queueGameTelemetry(archivedGame);
+    void flushTelemetryQueue();
+  }catch(error){
+    console.warn('Telemetry queue error',error);
+  }
+}
+
 async function newGame(){
   if(game?.turns?.length && !confirm('Start a new game? The current game will remain saved in History.'))return;
-  if(game && game.status==='active' && game.turns.length){game.status='abandoned';game.endedAt=new Date().toISOString();await persist();}
+  if(game && game.status==='active' && game.turns.length){
+    game.status='abandoned';game.endedAt=new Date().toISOString();await persist();
+    await archiveForTelemetry(clone(game));
+  }
   game=createGame();historyStack=[];clearRanking('Enter 5 cards to begin.');await persist();render();
 }
 
 async function endGame(){
   if(!confirm(`Finish this game with ${game.score} points?`))return;
   snapshot();game.status='completed';game.endedAt=new Date().toISOString();await persist();
+  await archiveForTelemetry(clone(game));
   await renderHistory();await renderStats();setView('history');
   game=createGame();historyStack=[];await persist();render();clearRanking('Enter 5 cards to begin.');
 }
@@ -212,6 +243,7 @@ els['new-game-btn'].addEventListener('click',newGame);
 els['end-game-btn'].addEventListener('click',endGame);
 els['export-json-btn'].addEventListener('click',exportJson);
 els['import-json-input'].addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{await importJson(file);}catch(err){alert(`Import failed: ${err.message}`);}finally{e.target.value='';}});
+window.addEventListener('online',()=>{void flushTelemetryQueue();});
 
 async function boot(){
   initWorker();
@@ -219,5 +251,6 @@ async function boot(){
   await persist();
   render();
   await renderStats();
+  void flushTelemetryQueue();
 }
 boot();
