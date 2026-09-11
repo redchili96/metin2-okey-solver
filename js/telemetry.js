@@ -6,7 +6,7 @@ import {
 } from './storage.js';
 
 const ENDPOINT = 'https://nxfgnaztkjecflzhfcgo.supabase.co/functions/v1/ingest-okey-game';
-const APP_VERSION = '0.6.1';
+const APP_VERSION = '0.6.2';
 const SOLVER_VERSION = 'mc-seeded-v2';
 
 function unseenCount(before) {
