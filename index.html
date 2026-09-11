@@ -19,7 +19,7 @@
         <p>Your Okey companion for maximum score.</p>
       </div>
     </div>
-    <span class="version">v0.5.0</span>
+    <span class="version">v0.6.0</span>
   </header>
 
   <nav class="tabs" aria-label="Main navigation">
@@ -30,18 +30,16 @@
 
   <main>
     <section id="view-play" class="view active">
-      <div class="summary-grid">
-        <div class="metric"><span>Score</span><strong id="score-value">0</strong></div>
-        <div class="metric"><span>On table</span><strong id="hand-count">0 / 5</strong></div>
-        <div class="metric"><span>Unseen</span><strong id="unseen-count">24</strong></div>
-        <div class="metric"><span>Used</span><strong id="used-count">0</strong></div>
+      <div class="game-status-bar">
+        <div class="status-metric"><span>Score</span><strong id="score-value">0</strong></div>
+        <div class="status-metric"><span>Cards left</span><strong id="unseen-count">24</strong></div>
       </div>
 
-      <section class="panel table-panel">
-        <div class="panel-head">
+      <section class="panel game-board">
+        <div class="panel-head board-head">
           <div>
             <div class="section-kicker">YOUR HAND</div>
-            <h2>Current table</h2>
+            <h2>Current hand</h2>
             <p id="table-hint">Select the first 5 cards shown in Metin2.</p>
           </div>
           <div class="table-actions">
@@ -56,28 +54,18 @@
             </div>
           </div>
         </div>
-        <div id="hand-slots" class="hand-slots" aria-live="polite"></div>
-        <p class="interaction-note">Match Metin2: right-click a card in your hand to record a discard.</p>
-      </section>
 
-      <section class="panel card-picker-panel">
-        <div class="panel-head compact-head">
-          <div>
-            <div class="section-kicker">CARD SET</div>
-            <h2>Select cards</h2>
-          </div>
-          <p class="panel-side-note">Blue · Red · Yellow &nbsp;|&nbsp; 1–8</p>
+        <div id="hand-slots" class="hand-slots board-hand" aria-live="polite"></div>
+        <div class="hand-legend" aria-label="Card controls">
+          <span><b>Left click</b> · discard</span>
+          <span><b>Right click</b> · move to play area</span>
         </div>
-        <div id="card-grid" class="card-grid-wrap"></div>
-      </section>
 
-      <section class="panel advisor-panel">
-        <div class="advisor-glow"></div>
-        <div class="panel-head solver-head">
-          <div>
-            <div class="section-kicker gold">OKEY ADVISOR</div>
-            <h2>Recommended move</h2>
-            <p>The recommendation updates automatically when your hand is ready.</p>
+        <section class="recommendation-strip" aria-label="Recommended move">
+          <div class="recommendation-copy">
+            <div class="section-kicker gold">RECOMMENDATION</div>
+            <p id="solver-status" class="status" aria-live="polite">Enter 5 cards to begin.</p>
+            <div id="solver-results" class="solver-results compact-results"></div>
           </div>
           <label class="precision-label">Calculation
             <select id="precision-select">
@@ -86,9 +74,31 @@
               <option value="2000">Maximum</option>
             </select>
           </label>
+        </section>
+
+        <section class="play-area-shell" aria-label="Play area">
+          <div class="play-area-head">
+            <div>
+              <div class="section-kicker">PLAY AREA</div>
+              <h3>Combination</h3>
+            </div>
+            <span class="play-area-counter"><span id="play-count">0</span> / 3</span>
+          </div>
+          <div id="play-slots" class="play-slots" aria-live="polite"></div>
+          <p id="play-area-status" class="play-area-status">Right-click cards in your hand to move them here.</p>
+          <button id="play-combination-btn" type="button" class="primary" hidden disabled>Play combination</button>
+        </section>
+      </section>
+
+      <section class="panel card-picker-panel">
+        <div class="panel-head compact-head">
+          <div>
+            <div class="section-kicker">AVAILABLE CARDS</div>
+            <h2>Card pool</h2>
+          </div>
+          <p class="panel-side-note">Blue · Red · Yellow &nbsp;|&nbsp; 1–8</p>
         </div>
-        <p id="solver-status" class="status" aria-live="polite">Enter 5 cards to begin.</p>
-        <div id="solver-results" class="solver-results"></div>
+        <div id="card-grid" class="card-grid-wrap"></div>
       </section>
 
       <div class="end-row">
