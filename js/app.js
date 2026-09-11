@@ -14,6 +14,11 @@ function clone(value){ return structuredClone(value); }
 function fmtDate(iso){ return new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(iso)); }
 function avg(values){ return values.length ? values.reduce((a,b)=>a+b,0)/values.length : 0; }
 function currentSolverMode(){ return els['precision-select'].selectedOptions?.[0]?.textContent?.trim().toLowerCase() || 'strong'; }
+function currentUnseenCount(){ return unseenCards(game.hand,game.used).length; }
+function canAnalyzeCurrentState(){
+  const unseenCount=currentUnseenCount();
+  return game.hand.length>0 && game.pendingDraws===0 && (game.hand.length===5 || unseenCount===0);
+}
 
 function initWorker(){
   worker?.terminate();
@@ -22,7 +27,7 @@ function initWorker(){
     const msg = event.data;
     if(msg.type==='error'){
       els['solver-status'].textContent=`Solver error: ${msg.message}`;
-      els['analyze-btn'].disabled=false;
+      els['analyze-btn'].disabled=!canAnalyzeCurrentState();
       return;
     }
     if(msg.type==='result'){
@@ -36,7 +41,7 @@ function initWorker(){
       };
       renderRanking();
       els['solver-status'].textContent=`Best move calculated from ${msg.ranked.length} legal moves.`;
-      els['analyze-btn'].disabled=false;
+      els['analyze-btn'].disabled=!canAnalyzeCurrentState();
     }
   };
 }
@@ -80,15 +85,24 @@ function renderHand(){
 }
 
 function renderSummary(){
+  const unseenCount=currentUnseenCount();
   els['score-value'].textContent=String(game.score);
   els['hand-count'].textContent=`${game.hand.length} / 5`;
-  els['unseen-count'].textContent=String(unseenCards(game.hand,game.used).length);
+  els['unseen-count'].textContent=String(unseenCount);
   els['used-count'].textContent=String(game.used.length);
-  els['analyze-btn'].disabled=game.hand.length!==5;
+  els['analyze-btn'].disabled=!canAnalyzeCurrentState();
   els['end-game-btn'].disabled=game.turns.length===0;
-  if(game.pendingDraws>0)els['table-hint'].textContent=`Add ${game.pendingDraws} newly drawn card${game.pendingDraws===1?'':'s'}.`;
-  else if(game.hand.length<5)els['table-hint'].textContent=`Select ${5-game.hand.length} more card${5-game.hand.length===1?'':'s'} from Metin2.`;
-  else els['table-hint'].textContent='Table captured. Analyze the best move.';
+  if(game.pendingDraws>0){
+    els['table-hint'].textContent=`Add ${game.pendingDraws} newly drawn card${game.pendingDraws===1?'':'s'}.`;
+  }else if(game.hand.length===0 && unseenCount===0){
+    els['table-hint'].textContent='All cards used. End & save the game.';
+  }else if(game.hand.length<5 && unseenCount===0){
+    els['table-hint'].textContent=`Final hand: ${game.hand.length} card${game.hand.length===1?'':'s'} left. Analyze the best move.`;
+  }else if(game.hand.length<5){
+    els['table-hint'].textContent=`Select ${5-game.hand.length} more card${5-game.hand.length===1?'':'s'} from Metin2.`;
+  }else{
+    els['table-hint'].textContent='Table captured. Analyze the best move.';
+  }
 }
 
 function clearRanking(message='State changed — analyze again.'){
@@ -110,12 +124,13 @@ async function toggleCard(id){
     const last=game.turns.at(-1);
     if(last) last.draws.push(id);
   }
-  clearRanking(game.hand.length===5?'Ready to analyze.':'Add the remaining cards.');
+  const unseenCount=currentUnseenCount();
+  clearRanking(canAnalyzeCurrentState()?(unseenCount===0?'Final hand ready to analyze.':'Ready to analyze.'):'Add the remaining cards.');
   await persist();render();
 }
 
 function analyze(){
-  if(game.hand.length!==5)return;
+  if(!canAnalyzeCurrentState())return;
   els['analyze-btn'].disabled=true;
   els['solver-status'].textContent='Calculating the best move…';
   els['solver-results'].innerHTML='';
@@ -160,8 +175,20 @@ async function applyMove(selectedRow){
   game.hand=game.hand.filter(id=>!selectedRow.action.cards.includes(id));
   game.used=[...game.used,...selectedRow.action.cards];
   game.score+=selectedRow.action.score;
-  game.pendingDraws=Math.min(5-game.hand.length,unseenCards(game.hand,game.used).length);
-  clearRanking(selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Enter the replacement cards.`:'Card discarded. Enter the replacement card.');
+  game.pendingDraws=Math.min(5-game.hand.length,currentUnseenCount());
+
+  const unseenCount=currentUnseenCount();
+  let nextMessage;
+  if(game.hand.length===0 && unseenCount===0){
+    nextMessage='All cards used. End & save the game.';
+  }else if(game.pendingDraws>0){
+    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Enter the replacement cards.`:'Card discarded. Enter the replacement card.';
+  }else if(unseenCount===0){
+    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Final cards remain — analyze again.`:'Final cards remain — analyze again.';
+  }else{
+    nextMessage='Analyze the next move.';
+  }
+  clearRanking(nextMessage);
   await persist();render();
 }
 
