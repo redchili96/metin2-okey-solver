@@ -135,10 +135,10 @@ function renderHand(){
     if(isInitialSetup()){
       button.title=`${cardLabel(id)} — click to remove from setup`;
     }else{
-      button.title=`${cardLabel(id)} — left-click to discard · right-click to play`;
+      button.title=`${cardLabel(id)} — left-click to play · right-click to discard`;
     }
     button.addEventListener('click',()=>{void handleHandLeftClick(id);});
-    button.addEventListener('contextmenu',event=>{event.preventDefault();requestMoveToPlayArea(id);});
+    button.addEventListener('contextmenu',event=>{event.preventDefault();void requestDiscard(id);});
     slot.appendChild(button);host.appendChild(slot);
   }
 }
@@ -169,7 +169,7 @@ function renderPlayArea(){
   playButton.hidden=true;playButton.disabled=true;status.className='play-area-status';
 
   if(playSelection.length===0){
-    status.textContent='Right-click cards in your hand to move them here.';
+    status.textContent='Left-click cards in your hand to move them here.';
     return;
   }
   if(playSelection.length<3){
@@ -208,9 +208,9 @@ function renderSummary(){
   }else if(playSelection.length>0){
     els['table-hint'].textContent='Build the combination in the play area, or return a card to your hand.';
   }else if(best?.action?.type==='discard'){
-    els['table-hint'].textContent='Left-click the card you actually discarded in Metin2.';
+    els['table-hint'].textContent='Right-click the card you actually discarded in Metin2.';
   }else if(best?.action?.type==='play'){
-    els['table-hint'].textContent='Right-click cards to move them into the play area.';
+    els['table-hint'].textContent='Left-click cards to move them into the play area.';
   }else if(game.hand.length<5 && unseenCount===0){
     els['table-hint'].textContent=`Final hand · ${game.hand.length} card${game.hand.length===1?'':'s'} left.`;
   }else{
@@ -318,7 +318,7 @@ async function handleHandLeftClick(id){
     await persist();render();
     return;
   }
-  await requestDiscard(id);
+  requestMoveToPlayArea(id);
 }
 
 function requestMoveToPlayArea(id){
