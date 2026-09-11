@@ -13,6 +13,8 @@ let analysisTimer = null;
 let activeAnalysisSeed = null;
 let activeAnalysisKey = null;
 let completedAnalysisKey = null;
+let pendingDiscardRow = null;
+let safeDiscardMode = true;
 
 function clone(value){ return structuredClone(value); }
 function fmtDate(iso){ return new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(iso)); }
@@ -32,6 +34,17 @@ function currentAnalysisKey(){
   });
 }
 function formatCards(ids){ return (ids||[]).map(cardLabel).join(' · '); }
+function sameAction(a,b){
+  if(!a||!b||a.type!==b.type||Number(a.score||0)!==Number(b.score||0))return false;
+  const ac=[...(a.cards||[])].sort(),bc=[...(b.cards||[])].sort();
+  return ac.length===bc.length && ac.every((id,i)=>id===bc[i]);
+}
+function loadSafeMode(){
+  try{return localStorage.getItem('m2-safe-discard')!=='off';}catch{return true;}
+}
+function saveSafeMode(){
+  try{localStorage.setItem('m2-safe-discard',safeDiscardMode?'on':'off');}catch{}
+}
 
 function initWorker(){
   worker?.terminate();
@@ -58,6 +71,8 @@ function initWorker(){
       completedAnalysisKey=activeAnalysisKey;
       activeAnalysisSeed=null;
       activeAnalysisKey=null;
+      renderSummary();
+      renderHand();
       renderRanking();
       els['solver-status'].textContent='Recommendation ready.';
     }
@@ -94,16 +109,27 @@ function renderCards(){
 
 function renderHand(){
   const host=els['hand-slots'];host.innerHTML='';
+  const best=latestRanking[0];
+  const recommendedCards=new Set(best?.action?.cards||[]);
   for(let i=0;i<5;i++){
     const id=game.hand[i];
     if(!id){const slot=document.createElement('div');slot.className='slot empty';slot.textContent='Empty';host.appendChild(slot);continue;}
     const card=CARD_BY_ID[id],slot=document.createElement('div');slot.className='slot';
-    const button=document.createElement('button');button.type='button';button.className=`card ${card.css}`;button.textContent=String(card.value);button.title=`${cardLabel(id)} — click to correct/remove`;button.setAttribute('aria-label',cardLabel(id));button.addEventListener('click',()=>toggleCard(id));slot.appendChild(button);host.appendChild(slot);
+    const button=document.createElement('button');button.type='button';button.className=`card ${card.css}`;button.textContent=String(card.value);button.setAttribute('aria-label',cardLabel(id));
+    if(recommendedCards.has(id)){
+      button.classList.add('recommended-move');
+      button.dataset.move=best.action.type==='discard'?'DISCARD':'PLAY';
+    }
+    button.title=best?`${cardLabel(id)} — right-click to record a discard · left-click to correct`:`${cardLabel(id)} — click to correct/remove`;
+    button.addEventListener('click',()=>toggleCard(id));
+    button.addEventListener('contextmenu',event=>{event.preventDefault();void requestDiscard(id);});
+    slot.appendChild(button);host.appendChild(slot);
   }
 }
 
 function renderSummary(){
   const unseenCount=currentUnseenCount();
+  const best=latestRanking[0];
   els['score-value'].textContent=String(game.score);
   els['hand-count'].textContent=`${game.hand.length} / 5`;
   els['unseen-count'].textContent=String(unseenCount);
@@ -113,6 +139,10 @@ function renderSummary(){
     els['table-hint'].textContent=`Add ${game.pendingDraws} newly drawn card${game.pendingDraws===1?'':'s'}.`;
   }else if(game.hand.length===0 && unseenCount===0){
     els['table-hint'].textContent='All cards used. End & save the game.';
+  }else if(best?.action?.type==='discard'){
+    els['table-hint'].textContent=`Recommended: ${actionLabel(best.action)}. Right-click the card you actually discarded in Metin2.`;
+  }else if(best?.action?.type==='play'){
+    els['table-hint'].textContent='Recommended combination highlighted. Confirm it below if you played it.';
   }else if(game.hand.length<5 && unseenCount===0){
     els['table-hint'].textContent=`Final hand · ${game.hand.length} card${game.hand.length===1?'':'s'} left.`;
   }else if(game.hand.length<5){
@@ -183,6 +213,40 @@ async function toggleCard(id){
   await persist();render();
 }
 
+async function requestDiscard(id){
+  if(!game.hand.includes(id))return;
+  if(game.pendingDraws>0){
+    els['solver-status'].textContent='Add the replacement card before recording another move.';
+    return;
+  }
+  if(!latestRanking.length){
+    els['solver-status'].textContent=canAnalyzeCurrentState()?'Recommendation is still calculating…':'Complete the hand first.';
+    return;
+  }
+  const row=latestRanking.find(item=>item.action?.type==='discard' && item.action.cards?.[0]===id);
+  if(!row){
+    els['solver-status'].textContent='That discard is not available in the current hand.';
+    return;
+  }
+  if(!safeDiscardMode){
+    await applyMove(row);
+    return;
+  }
+  pendingDiscardRow=row;
+  const best=latestRanking[0];
+  els['discard-dialog-title'].textContent=`Discard ${cardLabel(id)}?`;
+  if(sameAction(best.action,row.action)){
+    els['discard-dialog-copy'].textContent='This matches the recommended move.';
+  }else{
+    els['discard-dialog-copy'].textContent=`Recommended: ${actionLabel(best.action)} You selected: ${actionLabel(row.action)}.`;
+  }
+  if(typeof els['discard-dialog'].showModal==='function')els['discard-dialog'].showModal();
+  else{
+    const confirmed=confirm(`${els['discard-dialog-title'].textContent}\n\n${els['discard-dialog-copy'].textContent}`);
+    const selected=pendingDiscardRow;pendingDiscardRow=null;if(confirmed&&selected)await applyMove(selected);
+  }
+}
+
 function renderRanking(){
   const best=latestRanking[0];
   const host=els['solver-results'];host.innerHTML='';
@@ -190,7 +254,12 @@ function renderRanking(){
   const card=document.createElement('article');card.className='result-card best';
   const ci=Math.max(1,1.96*best.se);
   card.innerHTML=`<div class="result-top"><div><div class="result-rank">BEST MOVE</div><div class="result-title">${actionLabel(best.action)}</div></div><span class="badge">RECOMMENDED</span></div><div class="result-metrics"><div><span>Expected remaining</span><strong>${best.mean.toFixed(1)} ± ${ci.toFixed(1)}</strong></div><div><span>Projected final</span><strong>${(game.score+best.mean).toFixed(1)}</strong></div><div><span>Calculation</span><strong>EV Search</strong></div></div>`;
-  const button=document.createElement('button');button.type='button';button.className='primary';button.textContent='Apply move';button.addEventListener('click',()=>applyMove(best));card.appendChild(button);host.appendChild(card);
+  if(best.action.type==='discard'){
+    const note=document.createElement('p');note.className='move-instruction';note.textContent='Right-click the card you actually discarded in Metin2.';card.appendChild(note);
+  }else{
+    const button=document.createElement('button');button.type='button';button.className='primary';button.textContent='Confirm combination played';button.addEventListener('click',()=>applyMove(best));card.appendChild(button);
+  }
+  host.appendChild(card);
 }
 
 async function applyMove(selectedRow){
@@ -226,9 +295,9 @@ async function applyMove(selectedRow){
   if(game.hand.length===0 && unseenCount===0){
     nextMessage='All cards used. End & save the game.';
   }else if(game.pendingDraws>0){
-    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Add the replacement cards.`:'Add the replacement card.';
+    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Add the replacement cards.`:'Discard recorded. Add the replacement card.';
   }else if(unseenCount===0){
-    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Preparing final recommendation…`:'Preparing final recommendation…';
+    nextMessage=selectedRow.action.type==='play'?`+${selectedRow.action.score} points. Preparing final recommendation…`:'Discard recorded. Preparing final recommendation…';
   }else{
     nextMessage='Preparing recommendation…';
   }
@@ -312,11 +381,19 @@ els['undo-btn'].addEventListener('click',undo);
 els['new-game-btn'].addEventListener('click',newGame);
 els['end-game-btn'].addEventListener('click',endGame);
 els['precision-select'].addEventListener('change',()=>{clearRanking('Updating recommendation…');render();});
+els['safe-mode-toggle'].addEventListener('change',()=>{safeDiscardMode=els['safe-mode-toggle'].checked;saveSafeMode();});
+els['discard-cancel-btn'].addEventListener('click',()=>{pendingDiscardRow=null;els['discard-dialog'].close();});
+els['discard-confirm-btn'].addEventListener('click',async()=>{
+  const selected=pendingDiscardRow;pendingDiscardRow=null;els['discard-dialog'].close();if(selected)await applyMove(selected);
+});
+els['discard-dialog'].addEventListener('cancel',()=>{pendingDiscardRow=null;});
 els['export-json-btn'].addEventListener('click',exportJson);
 els['import-json-input'].addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{await importJson(file);}catch(err){alert(`Import failed: ${err.message}`);}finally{e.target.value='';}});
 window.addEventListener('online',()=>{void flushTelemetryQueue();});
 
 async function boot(){
+  safeDiscardMode=loadSafeMode();
+  els['safe-mode-toggle'].checked=safeDiscardMode;
   initWorker();
   game=await getLatestActiveGame()||createGame();
   await persist();
