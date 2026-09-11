@@ -2,6 +2,20 @@ const COLORS = ['B','R','Y'];
 const CARDS = COLORS.flatMap((color, colorIndex) => Array.from({length:8},(_,i)=>({id:`${color}${i+1}`,color,value:i+1,index:colorIndex*8+i})));
 const BY_ID = Object.fromEntries(CARDS.map(c=>[c.id,c]));
 
+function hashSeed(seed){
+  let h=2166136261>>>0;
+  for(let i=0;i<seed.length;i++){h^=seed.charCodeAt(i);h=Math.imul(h,16777619)}
+  return h>>>0;
+}
+function mulberry32(a){
+  return function(){
+    let t=a+=0x6D2B79F5;
+    t=Math.imul(t^t>>>15,t|1);
+    t^=t+Math.imul(t^t>>>7,t|61);
+    return ((t^t>>>14)>>>0)/4294967296;
+  }
+}
+
 function scoreCombo(ids){
   if(ids.length!==3)return 0;
   const c=ids.map(id=>BY_ID[id]);
@@ -22,9 +36,9 @@ function combos(hand){
 }
 function actions(hand){return [...hand.map(id=>({type:'discard',cards:[id],score:0})),...combos(hand)];}
 function unseen(hand,used){const s=new Set([...hand,...used]);return CARDS.map(c=>c.id).filter(id=>!s.has(id));}
-function randomDraw(deck,count){
+function randomDraw(deck,count,rng){
   const copy=deck.slice(),out=[];
-  for(let i=0;i<count&&copy.length;i++){const j=Math.floor(Math.random()*copy.length);out.push(copy[j]);copy.splice(j,1)}
+  for(let i=0;i<count&&copy.length;i++){const j=Math.floor(rng()*copy.length);out.push(copy[j]);copy.splice(j,1)}
   return {drawn:out,remaining:copy};
 }
 
@@ -64,41 +78,42 @@ function rolloutPolicy(hand,deck){
   return best;
 }
 
-function applyAction(hand,deck,action){
+function applyAction(hand,deck,action,rng){
   const kept=hand.filter(id=>!action.cards.includes(id));
   const need=Math.min(5-kept.length,deck.length);
-  const draw=randomDraw(deck,need);
+  const draw=randomDraw(deck,need,rng);
   return {hand:[...kept,...draw.drawn],deck:draw.remaining,gain:action.score};
 }
 
-function rollout(hand,deck){
+function rollout(hand,deck,rng){
   let total=0,guard=0;
   while((hand.length||deck.length)&&guard++<30){
-    if(hand.length<5&&deck.length){const draw=randomDraw(deck,Math.min(5-hand.length,deck.length));hand=[...hand,...draw.drawn];deck=draw.remaining;}
+    if(hand.length<5&&deck.length){const draw=randomDraw(deck,Math.min(5-hand.length,deck.length),rng);hand=[...hand,...draw.drawn];deck=draw.remaining;}
     if(!hand.length)break;
     const a=rolloutPolicy(hand,deck);if(!a)break;
-    const next=applyAction(hand,deck,a);total+=next.gain;hand=next.hand;deck=next.deck;
+    const next=applyAction(hand,deck,a,rng);total+=next.gain;hand=next.hand;deck=next.deck;
   }
   return total;
 }
 
-function estimate(state,action,trials){
+function estimate(state,action,trials,rng){
   const deck0=unseen(state.hand,state.used);let sum=0,sum2=0;
   for(let t=0;t<trials;t++){
-    const first=applyAction(state.hand,deck0,action);
-    const gain=first.gain+rollout(first.hand,first.deck);
+    const first=applyAction(state.hand,deck0,action,rng);
+    const gain=first.gain+rollout(first.hand,first.deck,rng);
     sum+=gain;sum2+=gain*gain;
   }
   const mean=sum/trials;const variance=Math.max(0,sum2/trials-mean*mean);return {mean,se:Math.sqrt(variance/trials)};
 }
 
 self.onmessage=(event)=>{
-  const {type,state,simulations=800}=event.data||{};
+  const {type,state,simulations=800,seed=`seed-${Date.now()}`}=event.data||{};
   if(type!=='analyze')return;
   try{
     const acts=actions(state.hand);
     const per=Math.max(60,Math.floor(simulations/Math.max(1,acts.length)));
-    const ranked=acts.map(action=>({action,...estimate(state,action,per)})).sort((a,b)=>b.mean-a.mean);
-    self.postMessage({type:'result',ranked,simulationsPerAction:per});
+    const rng=mulberry32(hashSeed(seed));
+    const ranked=acts.map(action=>({action,...estimate(state,action,per,rng)})).sort((a,b)=>b.mean-a.mean);
+    self.postMessage({type:'result',ranked,simulationsPerAction:per,seed});
   }catch(error){self.postMessage({type:'error',message:error?.message||String(error)});}
 };
