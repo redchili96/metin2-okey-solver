@@ -16,6 +16,7 @@ let completedAnalysisKey = null;
 let pendingDiscardRow = null;
 let safeDiscardMode = true;
 let playSelection = [];
+let autoPlayInFlight = false;
 
 function clone(value){ return structuredClone(value); }
 function fmtDate(iso){ return new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(iso)); }
@@ -80,6 +81,7 @@ function initWorker(){
       renderPlayArea();
       renderRecommendation();
       els['solver-status'].textContent='Recommendation ready.';
+      void autoPlaySelectedCombination();
     }
   };
 }
@@ -166,7 +168,8 @@ function renderPlayArea(){
   els['play-count'].textContent=String(playSelection.length);
   const playButton=els['play-combination-btn'];
   const status=els['play-area-status'];
-  playButton.hidden=true;playButton.disabled=true;status.className='play-area-status';
+  if(playButton){playButton.hidden=true;playButton.disabled=true;}
+  status.className='play-area-status';
 
   if(playSelection.length===0){
     status.textContent='Left-click cards in your hand to move them here.';
@@ -174,7 +177,7 @@ function renderPlayArea(){
   }
   if(playSelection.length<3){
     const remaining=3-playSelection.length;
-    status.textContent=`Select ${remaining} more card${remaining===1?'':'s'} to build a combination.`;
+    status.textContent=`Select ${remaining} more card${remaining===1?'':'s'} to complete the combination.`;
     return;
   }
 
@@ -185,11 +188,10 @@ function renderPlayArea(){
     return;
   }
 
-  status.textContent=`Valid combination · +${score} points`;
+  status.textContent=latestRanking.length
+    ? `Valid combination · +${score} points · playing automatically…`
+    : `Valid combination · +${score} points · waiting for calculation…`;
   status.classList.add('valid');
-  playButton.hidden=false;
-  playButton.disabled=!latestRanking.length;
-  playButton.textContent=latestRanking.length?`Play combination · +${score}`:'Waiting for calculation…';
 }
 
 function renderSummary(){
@@ -206,7 +208,7 @@ function renderSummary(){
   }else if(isInitialSetup()){
     els['table-hint'].textContent=`Setup · select ${5-game.hand.length} more card${5-game.hand.length===1?'':'s'} from the pool below.`;
   }else if(playSelection.length>0){
-    els['table-hint'].textContent='Build the combination in the play area, or return a card to your hand.';
+    els['table-hint'].textContent='Complete a valid 3-card combination. It will play automatically.';
   }else if(best?.action?.type==='discard'){
     els['table-hint'].textContent='Right-click the card you actually discarded in Metin2.';
   }else if(best?.action?.type==='play'){
@@ -341,9 +343,11 @@ function requestMoveToPlayArea(id){
   }
   playSelection.push(id);
   renderSummary();renderHand();renderPlayArea();renderCards();
+  if(playSelection.length===3)void autoPlaySelectedCombination();
 }
 
 function returnFromPlayArea(id){
+  if(autoPlayInFlight)return;
   playSelection=playSelection.filter(cardId=>cardId!==id);
   renderSummary();renderHand();renderPlayArea();renderCards();
 }
@@ -382,12 +386,12 @@ async function requestDiscard(id){
   }
 }
 
-async function playSelectedCombination(){
-  if(playSelection.length!==3)return;
+async function autoPlaySelectedCombination(){
+  if(autoPlayInFlight || playSelection.length!==3)return;
   const score=scoreCombination(playSelection);
   if(score<=0)return;
   if(!latestRanking.length){
-    els['solver-status'].textContent='Recommendation is still calculating…';
+    els['solver-status'].textContent='Valid combination ready. Waiting for calculation…';
     return;
   }
   const selectedAction={type:'play',cards:[...playSelection],score};
@@ -397,7 +401,12 @@ async function playSelectedCombination(){
     els['play-area-status'].className='play-area-status invalid';
     return;
   }
-  await applyMove(row);
+  autoPlayInFlight=true;
+  try{
+    await applyMove(row);
+  }finally{
+    autoPlayInFlight=false;
+  }
 }
 
 async function applyMove(selectedRow){
@@ -519,7 +528,6 @@ async function importJson(file){
 els['undo-btn'].addEventListener('click',undo);
 els['new-game-btn'].addEventListener('click',newGame);
 els['end-game-btn'].addEventListener('click',endGame);
-els['play-combination-btn'].addEventListener('click',()=>{void playSelectedCombination();});
 els['precision-select'].addEventListener('change',()=>{playSelection=[];clearRanking('Updating recommendation…');render();});
 els['safe-mode-toggle'].addEventListener('change',()=>{safeDiscardMode=els['safe-mode-toggle'].checked;saveSafeMode();});
 els['discard-cancel-btn'].addEventListener('click',()=>{pendingDiscardRow=null;els['discard-dialog'].close();});
