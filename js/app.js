@@ -108,7 +108,7 @@ function renderCards(){
       if(playSelection.includes(id))button.classList.add('queued');
       if(game.used.includes(id)){button.classList.add('used');button.disabled=true;}
       button.addEventListener('click',()=>selectPoolCard(id));
-      grid.appendChild(row.appendChild(button));
+      row.appendChild(button);
     }
     grid.appendChild(row);
   }
