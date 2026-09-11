@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0b0e12" />
   <title>M2 Labs — Okey Helper</title>
   <link rel="stylesheet" href="./css/styles.css" />
+  <link rel="stylesheet" href="./css/discard-flow.css" />
 </head>
 <body>
   <div class="top-rule"></div>
@@ -18,7 +19,7 @@
         <p>Your Okey companion for maximum score.</p>
       </div>
     </div>
-    <span class="version">v0.4.0</span>
+    <span class="version">v0.5.0</span>
   </header>
 
   <nav class="tabs" aria-label="Main navigation">
@@ -43,12 +44,20 @@
             <h2>Current table</h2>
             <p id="table-hint">Select the first 5 cards shown in Metin2.</p>
           </div>
-          <div class="actions-inline">
-            <button id="undo-btn" class="secondary">Undo</button>
-            <button id="new-game-btn" class="secondary">New game</button>
+          <div class="table-actions">
+            <label class="safe-toggle" title="Ask for confirmation before recording a discard">
+              <input id="safe-mode-toggle" type="checkbox" checked />
+              <span class="switch" aria-hidden="true"></span>
+              <span>Safe discard</span>
+            </label>
+            <div class="actions-inline">
+              <button id="undo-btn" class="secondary">Undo</button>
+              <button id="new-game-btn" class="secondary">New game</button>
+            </div>
           </div>
         </div>
         <div id="hand-slots" class="hand-slots" aria-live="polite"></div>
+        <p class="interaction-note">Match Metin2: right-click a card in your hand to record a discard.</p>
       </section>
 
       <section class="panel card-picker-panel">
@@ -117,6 +126,18 @@
       </section>
     </section>
   </main>
+
+  <dialog id="discard-dialog" class="confirm-dialog">
+    <div class="confirm-card">
+      <div class="section-kicker gold">SAFE DISCARD</div>
+      <h2 id="discard-dialog-title">Discard this card?</h2>
+      <p id="discard-dialog-copy">Confirm the discard before it is recorded.</p>
+      <div class="confirm-actions">
+        <button id="discard-cancel-btn" type="button" class="secondary">No</button>
+        <button id="discard-confirm-btn" type="button" class="primary">Discard</button>
+      </div>
+    </div>
+  </dialog>
 
   <footer>
     <span class="footer-gem">◆</span> M2 Labs — Okey Helper · Anonymous game and turn data is shared with M2 Labs to improve the solver. No account, email, Discord ID or persistent player identifier is stored.
